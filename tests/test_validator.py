@@ -30,6 +30,11 @@ def forecast_campaign_roi(dataset, campaign_id):
     return g(campaign_id)
 '''
 
+BAD_SOURCE_DUNDER_ESCAPE = '''
+def forecast_campaign_roi(dataset, campaign_id):
+    return ().__class__.__bases__[0].__subclasses__()
+'''
+
 def test_valid_source_passes():
     ok, _ = validate_skill_source(GOOD_SOURCE, "forecast_campaign_roi")
     assert ok is True
@@ -57,3 +62,8 @@ def test_aliased_eval_call_is_rejected():
     ok, reason = validate_skill_source(BAD_SOURCE_ALIASED_EVAL, "forecast_campaign_roi")
     assert ok is False
     assert "eval" in reason
+
+def test_dunder_attribute_escape_is_rejected():
+    ok, reason = validate_skill_source(BAD_SOURCE_DUNDER_ESCAPE, "forecast_campaign_roi")
+    assert ok is False
+    assert "dunder" in reason.lower() or "__" in reason
