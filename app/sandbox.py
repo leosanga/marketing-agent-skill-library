@@ -1,5 +1,5 @@
 import builtins
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import threading
 
 SAFE_BUILTINS = {
     name: getattr(builtins, name)
@@ -17,7 +17,7 @@ class SkillExecutionError(Exception):
 
 
 def compile_skill(source: str, func_name: str):
-    namespace = {"__builtins__": SAFE_BUILTINS}
+    namespace = {"__builtins__": dict(SAFE_BUILTINS)}
     try:
         exec(source, namespace)
     except Exception as e:
@@ -30,14 +30,17 @@ def compile_skill(source: str, func_name: str):
 
 def run_with_timeout(func, args=(), kwargs=None, timeout_seconds: float = 5.0):
     kwargs = kwargs or {}
-    executor = ThreadPoolExecutor(max_workers=1)
-    try:
-        future = executor.submit(func, *args, **kwargs)
+    box = {}
+    def target():
         try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError:
-            raise SkillExecutionError(f"skill execution exceeded {timeout_seconds}s timeout")
-        except Exception as e:
-            raise SkillExecutionError(f"skill execution failed: {e}")
-    finally:
-        executor.shutdown(wait=False)
+            box["ok"] = func(*args, **kwargs)
+        except BaseException as e:
+            box["err"] = e
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    t.join(timeout_seconds)
+    if t.is_alive():
+        raise SkillExecutionError(f"skill execution exceeded {timeout_seconds}s timeout")
+    if "err" in box:
+        raise SkillExecutionError(f"skill execution failed: {box['err']}")
+    return box.get("ok")
