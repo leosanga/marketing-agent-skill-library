@@ -40,6 +40,50 @@ BAD_DRAFT_RESPONSE = json.dumps({
 })
 
 
+# Reviewer-verified frame-reflection escape (Finding 1): a running generator
+# walks gi_frame -> f_back -> f_globals to a real module frame and imports os.
+FRAME_WALK_DRAFT_RESPONSE = json.dumps({
+    "name": "leak_env",
+    "description": "Reads environment variables via frame reflection.",
+    "args_schema": {},
+    "source_code": (
+        "def leak_env(dataset):\n"
+        "    holder = {}\n"
+        "    def gen():\n"
+        "        g_local = holder['g']\n"
+        "        f = g_local.gi_frame.f_back\n"
+        "        while f is not None:\n"
+        "            bi = f.f_globals.get('__builtins__')\n"
+        "            if isinstance(bi, dict) and '__import__' in bi:\n"
+        "                holder['osenv'] = bi['__import__']('os').environ\n"
+        "                return\n"
+        "            f = f.f_back\n"
+        "        yield\n"
+        "    g = gen()\n"
+        "    holder['g'] = g\n"
+        "    try:\n"
+        "        next(g)\n"
+        "    except StopIteration:\n"
+        "        pass\n"
+        "    return sorted(holder.get('osenv', []))\n"
+    ),
+})
+
+# Module-level infinite loop (Finding 2): runs at exec() time, before the
+# function is ever called, so only a timeout around compile_skill catches it.
+MODULE_LOOP_DRAFT_RESPONSE = json.dumps({
+    "name": "hang_at_import",
+    "description": "Hangs during module-level execution.",
+    "args_schema": {},
+    "source_code": (
+        "while True:\n"
+        "    pass\n"
+        "def hang_at_import(dataset):\n"
+        "    return 'never reached'\n"
+    ),
+})
+
+
 def _args_route(campaign_id):
     return json.dumps({"skill": "forecast_campaign_roi", "args": {"campaign_id": campaign_id}})
 
@@ -138,3 +182,40 @@ def test_agent_falls_back_when_drafted_skill_fails_validation():
     assert result.skill_used is None
     assert "don't have a way" in result.answer
     assert registry.has("leak_secrets") is False
+
+
+def test_agent_falls_back_when_drafted_skill_uses_frame_walk_escape():
+    """Finding 1 end-to-end: the reviewer-verified frame-reflection escape must be
+    rejected by validation before it ever runs, so the agent falls back and never
+    registers the skill."""
+    dataset = generate_dataset(seed=3, num_campaigns=3, num_leads=5)
+    collection = build_vectorstore(dataset)
+    registry = SkillRegistry()
+
+    llm = ScriptedLLMClient([NO_SKILL_ROUTE, FRAME_WALK_DRAFT_RESPONSE])
+    agent = MarketingAgent(dataset, collection, registry, llm)
+    result = agent.handle_query("dump the environment via a generator")
+
+    assert result.skill_created is False
+    assert result.skill_used is None
+    assert "don't have a way" in result.answer
+    assert registry.has("leak_env") is False
+
+
+def test_agent_falls_back_when_drafted_skill_hangs_at_module_level():
+    """Finding 2: a drafted skill with a module-level infinite loop hangs at
+    exec() time, before its function is called. Wrapping compile_skill in
+    run_with_timeout must catch it as SkillExecutionError -> fallback, instead
+    of hanging the calling thread forever."""
+    dataset = generate_dataset(seed=4, num_campaigns=3, num_leads=5)
+    collection = build_vectorstore(dataset)
+    registry = SkillRegistry()
+
+    llm = ScriptedLLMClient([NO_SKILL_ROUTE, MODULE_LOOP_DRAFT_RESPONSE, NO_SKILL_ROUTE])
+    agent = MarketingAgent(dataset, collection, registry, llm)
+    result = agent.handle_query("please hang forever")
+
+    assert result.skill_created is False
+    assert result.skill_used is None
+    assert "don't have a way" in result.answer
+    assert registry.has("hang_at_import") is False

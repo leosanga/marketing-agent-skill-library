@@ -3,6 +3,17 @@ import ast
 FORBIDDEN_CALL_NAMES = {"eval", "exec", "open", "__import__", "compile", "input"}
 FORBIDDEN_NAME_PREFIXES = {"os", "sys", "subprocess", "socket", "shutil", "importlib"}
 
+# Non-dunder reflection attributes on generators/coroutines/frames/tracebacks.
+# A running generator can walk gi_frame -> f_back -> f_globals/f_builtins to
+# reach a real module's __builtins__ and from there __import__("os"), escaping
+# the SAFE_BUILTINS sandbox. None of these are dunders, so the dunder check
+# below does not catch them.
+FORBIDDEN_FRAME_ATTRS = {
+    "gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await",
+    "ag_frame", "ag_code", "f_back", "f_globals", "f_locals", "f_builtins",
+    "f_code", "f_trace", "tb_frame", "tb_next", "co_consts", "func_globals",
+}
+
 
 def _is_dunder(name: str) -> bool:
     """Check if name is a dunder (starts and ends with __)."""
@@ -34,6 +45,10 @@ def validate_skill_source(source: str, expected_func_name: str) -> tuple[bool, s
         if isinstance(node, ast.Attribute):
             if _is_dunder(node.attr):
                 return False, f"forbidden reference: dunder attribute access ({node.attr})"
+            if node.attr in FORBIDDEN_FRAME_ATTRS:
+                return False, f"forbidden reference: frame/generator attribute ({node.attr})"
+            if node.attr in FORBIDDEN_CALL_NAMES:
+                return False, f"forbidden reference: {node.attr}"
             if isinstance(node.value, ast.Name):
                 if node.value.id in FORBIDDEN_NAME_PREFIXES:
                     return False, f"forbidden reference: {node.value.id}"

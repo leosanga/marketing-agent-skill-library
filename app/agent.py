@@ -122,7 +122,13 @@ class MarketingAgent:
             draft_args = self._extract_args_for_drafted_skill(query, drafted, context)
 
             try:
-                compiled_func = compile_skill(drafted.source_code, drafted.name)
+                # Timeout-protect the exec() inside compile_skill too: module-level
+                # code in a drafted skill (e.g. a top-level infinite loop) runs at
+                # exec time, before the function is ever called, so it must be under
+                # the same timeout as the call below or it can hang the thread.
+                compiled_func = run_with_timeout(
+                    lambda: compile_skill(drafted.source_code, drafted.name)
+                )
                 bound_func = self._bind_drafted_skill(compiled_func)
                 answer = run_with_timeout(bound_func, kwargs=draft_args)
             except SkillExecutionError:

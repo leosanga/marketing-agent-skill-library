@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Must run before importing app.security_gate, which reads ALLOWED_ORIGIN
@@ -56,6 +57,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Marketing Agent Skill Library", lifespan=lifespan)
+
+# The only intended client is a browser widget, so it issues a CORS preflight
+# (OPTIONS /chat) before POSTing. Without this the preflight 405s and the app
+# is unusable from any browser. Allowed origin mirrors the security gate.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[security_gate_module.ALLOWED_ORIGIN],
+    allow_methods=["POST"],
+    allow_headers=["content-type"],
+)
 
 
 @lru_cache

@@ -118,6 +118,23 @@ def test_app_fails_to_start_without_allowed_origin(monkeypatch):
             pass  # pragma: no cover - should never be reached
 
 
+def test_chat_options_preflight_gets_cors_response_not_405():
+    """Finding 3: a browser widget issues an OPTIONS /chat preflight before its
+    POST. Without CORSMiddleware that preflight 405s and the app is unusable from
+    any browser. The middleware's allow_origins is captured at import time from
+    security_gate.ALLOWED_ORIGIN, so we echo that exact value as the Origin."""
+    client = TestClient(app)
+    response = client.options(
+        "/chat",
+        headers={
+            "origin": gate_module.ALLOWED_ORIGIN,
+            "access-control-request-method": "POST",
+        },
+    )
+    assert response.status_code != 405
+    assert response.headers.get("access-control-allow-origin") == gate_module.ALLOWED_ORIGIN
+
+
 class RecordingStubAgent:
     def __init__(self):
         self.received_query = None
