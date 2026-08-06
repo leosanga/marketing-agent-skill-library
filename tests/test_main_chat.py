@@ -1,7 +1,10 @@
 # tests/test_main_chat.py
+import pytest
 from fastapi.testclient import TestClient
-from app.main import app, get_agent, security_gate
+from app.main import app, check_config, get_agent, security_gate
 from app.agent import AgentResponse
+from app.scenarios import SCENARIOS
+from app import security_gate as gate_module
 
 
 class StubAgent:
@@ -34,5 +37,70 @@ def test_chat_endpoint_rejects_unknown_scenario():
     try:
         response = client.post("/chat", json={"scenario_id": "not_a_real_scenario"})
         assert response.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_check_config_raises_when_groq_api_key_missing(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        check_config()
+
+
+def test_check_config_passes_when_groq_api_key_present(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    check_config()  # should not raise
+
+
+def test_app_fails_to_start_without_groq_api_key(monkeypatch):
+    """Integration check that check_config is actually wired into app startup
+    (via the lifespan handler), not just defined and unused. A misconfigured
+    deployment must fail before /health can ever report green."""
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        with TestClient(app):
+            pass  # pragma: no cover - should never be reached
+
+
+class RecordingStubAgent:
+    def __init__(self):
+        self.received_query = None
+
+    def handle_query(self, query):
+        self.received_query = query
+        return AgentResponse(answer="stub answer", skill_used=None, skill_created=False)
+
+
+def test_chat_endpoint_passes_scenario_query_not_scenario_id_to_agent():
+    stub = RecordingStubAgent()
+    app.dependency_overrides[get_agent] = lambda: stub
+    app.dependency_overrides[security_gate] = _noop_security_gate
+    client = TestClient(app)
+    try:
+        response = client.post("/chat", json={"scenario_id": "top_leads"})
+        assert response.status_code == 200
+        expected_query = next(s["query"] for s in SCENARIOS if s["id"] == "top_leads")
+        assert stub.received_query == expected_query
+        assert stub.received_query != "top_leads"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_endpoint_rejects_disallowed_origin_via_real_security_gate(monkeypatch):
+    """Regression: proves /chat is actually gated by the real security_gate
+    dependency, not just by whatever the test happens to override it with.
+    If `dependencies=[Depends(security_gate)]` were ever accidentally removed
+    from the /chat route, this test would fail."""
+    monkeypatch.setattr(gate_module, "ALLOWED_ORIGIN", "https://leosanga.example")
+    monkeypatch.setattr(gate_module, "_request_log", {})
+    app.dependency_overrides[get_agent] = lambda: StubAgent()
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/chat",
+            json={"scenario_id": "top_leads"},
+            headers={"origin": "https://evil.example"},
+        )
+        assert response.status_code == 403
     finally:
         app.dependency_overrides.clear()
