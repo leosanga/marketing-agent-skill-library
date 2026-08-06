@@ -33,3 +33,30 @@ def test_blocks_after_rate_limit_exceeded(client):
         assert response.status_code == 200
     response = client.get("/protected", headers=headers)
     assert response.status_code == 429
+
+
+def test_blocks_origin_that_contains_allowed_origin_as_substring(client):
+    """Regression: substring matching would bypass the check."""
+    response = client.get("/protected", headers={"origin": "https://leosanga.example.evil.com"})
+    assert response.status_code == 403
+
+
+def test_blocks_referer_with_allowed_origin_in_query_string(client):
+    """Regression: substring matching would bypass the check via query params."""
+    response = client.get("/protected", headers={"referer": "https://evil.com/?x=https://leosanga.example"})
+    assert response.status_code == 403
+
+
+def test_blocks_request_with_empty_allowed_origin(monkeypatch):
+    """Empty ALLOWED_ORIGIN should reject all requests, not allow everything."""
+    monkeypatch.setattr(gate_module, "ALLOWED_ORIGIN", "")
+    monkeypatch.setattr(gate_module, "_request_log", {})
+    test_app = FastAPI()
+
+    @test_app.get("/protected", dependencies=[Depends(security_gate)])
+    def protected():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    response = client.get("/protected", headers={"origin": "https://leosanga.example"})
+    assert response.status_code == 403

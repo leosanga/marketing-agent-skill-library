@@ -1,6 +1,7 @@
 import os
 import time
 from collections import defaultdict
+from urllib.parse import urlparse
 
 from fastapi import Request, HTTPException
 
@@ -13,7 +14,9 @@ _request_log: dict[str, list[float]] = defaultdict(list)
 
 def _check_origin(request: Request) -> None:
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if ALLOWED_ORIGIN not in origin:
+    parsed = urlparse(origin)
+    allowed = urlparse(ALLOWED_ORIGIN)
+    if (parsed.scheme, parsed.netloc) != (allowed.scheme, allowed.netloc):
         raise HTTPException(status_code=403, detail="origin not allowed")
 
 
