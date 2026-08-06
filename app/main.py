@@ -18,6 +18,7 @@ from app.data_gen import generate_dataset
 from app.llm_client import GroqLLMClient
 from app.scenarios import get_scenario
 from app.security_gate import security_gate
+from app import security_gate as security_gate_module
 from app.seed_skills import build_seed_registry
 from app.vectorstore import build_vectorstore
 
@@ -28,9 +29,24 @@ def check_config() -> None:
     Called at startup (via the lifespan handler below) so a misconfigured
     deployment fails loudly before /health can ever report green, instead of
     deferring the failure into first-request agent construction.
+
+    Both GROQ_API_KEY and ALLOWED_ORIGIN are required for the service to
+    actually work: a missing/placeholder ALLOWED_ORIGIN doesn't raise a
+    KeyError (app.security_gate falls back to a placeholder domain), it
+    just makes every /chat request 403. That failure mode wouldn't show up
+    in /health, so it's checked here explicitly rather than left to be
+    discovered at request time.
     """
-    if "GROQ_API_KEY" not in os.environ:
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
         raise RuntimeError("GROQ_API_KEY environment variable is required")
+
+    allowed_origin = os.environ.get("ALLOWED_ORIGIN", "")
+    if not allowed_origin or allowed_origin == security_gate_module.PLACEHOLDER_ORIGIN:
+        raise RuntimeError(
+            "ALLOWED_ORIGIN environment variable is required "
+            "(and must not be left as the placeholder domain)"
+        )
 
 
 @asynccontextmanager

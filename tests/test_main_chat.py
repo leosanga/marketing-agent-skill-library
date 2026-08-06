@@ -43,13 +43,46 @@ def test_chat_endpoint_rejects_unknown_scenario():
 
 def test_check_config_raises_when_groq_api_key_missing(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOWED_ORIGIN", "https://example.com")
     with pytest.raises(RuntimeError):
         check_config()
 
 
-def test_check_config_passes_when_groq_api_key_present(monkeypatch):
+def test_check_config_raises_when_groq_api_key_empty(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setenv("ALLOWED_ORIGIN", "https://example.com")
+    with pytest.raises(RuntimeError):
+        check_config()
+
+
+def test_check_config_passes_when_groq_api_key_and_allowed_origin_present(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("ALLOWED_ORIGIN", "https://example.com")
     check_config()  # should not raise
+
+
+def test_check_config_raises_when_allowed_origin_missing(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.delenv("ALLOWED_ORIGIN", raising=False)
+    with pytest.raises(RuntimeError):
+        check_config()
+
+
+def test_check_config_raises_when_allowed_origin_empty(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("ALLOWED_ORIGIN", "")
+    with pytest.raises(RuntimeError):
+        check_config()
+
+
+def test_check_config_raises_when_allowed_origin_left_as_placeholder(monkeypatch):
+    """A deployer could plausibly paste the placeholder domain verbatim
+    without realizing it isn't a real value. GROQ_API_KEY is correctly set
+    in this scenario, proving the ALLOWED_ORIGIN check is independent."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("ALLOWED_ORIGIN", "https://REPLACE_WITH_YOUR_DOMAIN.com")
+    with pytest.raises(RuntimeError):
+        check_config()
 
 
 def test_app_fails_to_start_without_groq_api_key(monkeypatch):
@@ -57,6 +90,19 @@ def test_app_fails_to_start_without_groq_api_key(monkeypatch):
     (via the lifespan handler), not just defined and unused. A misconfigured
     deployment must fail before /health can ever report green."""
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOWED_ORIGIN", "https://example.com")
+    with pytest.raises(RuntimeError):
+        with TestClient(app):
+            pass  # pragma: no cover - should never be reached
+
+
+def test_app_fails_to_start_without_allowed_origin(monkeypatch):
+    """Integration check mirroring test_app_fails_to_start_without_groq_api_key,
+    but for ALLOWED_ORIGIN: a deploy with GROQ_API_KEY set but ALLOWED_ORIGIN
+    missing must also fail startup, not silently boot and 403 every /chat
+    request later."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.delenv("ALLOWED_ORIGIN", raising=False)
     with pytest.raises(RuntimeError):
         with TestClient(app):
             pass  # pragma: no cover - should never be reached

@@ -5,7 +5,8 @@ from urllib.parse import urlparse
 
 from fastapi import Request, HTTPException
 
-ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "https://REPLACE_WITH_YOUR_DOMAIN.com")
+PLACEHOLDER_ORIGIN = "https://REPLACE_WITH_YOUR_DOMAIN.com"
+ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", PLACEHOLDER_ORIGIN)
 RATE_LIMIT_PER_HOUR = 5
 _WINDOW_SECONDS = 3600
 
