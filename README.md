@@ -13,20 +13,24 @@ Python, FastAPI, Groq (LLM), Chroma (embedded vector DB), Docker, Render (free t
 
 ## Configuration
 
-The service requires two environment variables. Both are required for the
-service to actually work, but only one of them is checked at startup:
+The service requires two environment variables. Both are checked at
+startup — the app refuses to start (and `/health` never gets a chance to
+report green) if either is missing, empty, or left as its placeholder
+value:
 
 | Variable | Required for | Checked at startup? |
 | --- | --- | --- |
-| `GROQ_API_KEY` | Answering any `/chat` request | Yes — the app refuses to start without it |
-| `ALLOWED_ORIGIN` | Passing the `/chat` origin check | **No** |
+| `GROQ_API_KEY` | Answering any `/chat` request | Yes — the app refuses to start if unset or empty |
+| `ALLOWED_ORIGIN` | Passing the `/chat` origin check | Yes — the app refuses to start if unset, empty, or left as the placeholder domain |
 
-If `ALLOWED_ORIGIN` is unset or wrong, the app still starts cleanly and
-`/health` still reports `{"status":"ok"}` — but every `/chat` request will
-be rejected with `403 origin not allowed`, because the security gate falls
-back to a placeholder origin (`https://REPLACE_WITH_YOUR_DOMAIN.com`) that
-will never match a real caller. A green `/health` check does **not** mean
-the deployment is fully configured — always set both variables.
+`ALLOWED_ORIGIN` must be set to the exact scheme+host that will call this
+API (e.g. `https://your-portfolio-domain.com`) — the security gate rejects
+any request whose Origin/Referer doesn't match it exactly. Startup fails
+fast with `ALLOWED_ORIGIN environment variable is required` if it's left
+unset or equal to the literal placeholder `https://REPLACE_WITH_YOUR_DOMAIN.com`,
+so a forgotten or copy-pasted-unedited value is caught before the service
+ever comes up, rather than surfacing later as a silent `403` on every
+`/chat` request.
 
 ## Local development
 
@@ -48,9 +52,9 @@ export them in your shell manually.
 `render.yaml` defines a single Docker web service. Both `GROQ_API_KEY` and
 `ALLOWED_ORIGIN` are declared with `sync: false`, which means Render will
 prompt you to set their values in the dashboard rather than committing
-secrets to the repo — set both before the first deploy. See the
-Configuration section above for why both matter even though only one is
-enforced at startup.
+secrets to the repo — set both before the first deploy. Both are enforced
+at startup (see Configuration above), so a deploy with either missing will
+fail to come up rather than serving traffic in a broken state.
 
 ## Known limitations (accepted, not bugs)
 
@@ -66,7 +70,3 @@ enforced at startup.
   outright, at this budget.
 - **First run in a fresh environment needs network access** to download
   Chroma's default embedding model (cached afterward).
-- **`ALLOWED_ORIGIN` misconfiguration is not caught at startup.** Unlike
-  `GROQ_API_KEY`, an unset or incorrect `ALLOWED_ORIGIN` will not fail
-  startup or fail `/health` — it will silently 403 every `/chat` request
-  instead. See the Configuration section above.

@@ -75,6 +75,16 @@ def test_check_config_raises_when_allowed_origin_empty(monkeypatch):
         check_config()
 
 
+def test_check_config_raises_when_allowed_origin_whitespace_only(monkeypatch):
+    """A whitespace-only value would pass the old `not allowed_origin` check
+    (truthy) and reach security_gate as a non-empty ALLOWED_ORIGIN that can
+    never match a real Origin header, silently 403ing every /chat request."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("ALLOWED_ORIGIN", "   ")
+    with pytest.raises(RuntimeError):
+        check_config()
+
+
 def test_check_config_raises_when_allowed_origin_left_as_placeholder(monkeypatch):
     """A deployer could plausibly paste the placeholder domain verbatim
     without realizing it isn't a real value. GROQ_API_KEY is correctly set

@@ -8,12 +8,11 @@ services:
       # refuse to start (fail fast at boot) if this is missing.
       - key: GROQ_API_KEY
         sync: false
-      # Required for the service to accept /chat requests. NOTE: unlike
-      # GROQ_API_KEY, a missing/wrong value here is NOT caught at startup —
-      # /health will still report green, but every /chat request will be
-      # rejected with 403 (origin not allowed) because the app falls back
-      # to a placeholder origin. Set this to the exact scheme+host that
-      # will call this API (e.g. https://your-portfolio-domain.com).
+      # Required for the service to accept /chat requests. Like GROQ_API_KEY,
+      # a missing/empty value here IS caught at startup — the app refuses to
+      # boot if this is unset, empty, or left as the literal placeholder
+      # domain (https://REPLACE_WITH_YOUR_DOMAIN.com). Set this to the exact
+      # scheme+host that will call this API (e.g. https://your-portfolio-domain.com).
       - key: ALLOWED_ORIGIN
         sync: false
     healthCheckPath: /health

@@ -41,7 +41,7 @@ def check_config() -> None:
     if not groq_key:
         raise RuntimeError("GROQ_API_KEY environment variable is required")
 
-    allowed_origin = os.environ.get("ALLOWED_ORIGIN", "")
+    allowed_origin = os.environ.get("ALLOWED_ORIGIN", "").strip()
     if not allowed_origin or allowed_origin == security_gate_module.PLACEHOLDER_ORIGIN:
         raise RuntimeError(
             "ALLOWED_ORIGIN environment variable is required "
