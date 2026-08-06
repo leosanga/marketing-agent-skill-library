@@ -71,6 +71,16 @@ def forecast_campaign_roi(dataset, campaign_id):
     return ev(campaign_id)
 '''
 
+# Re-review-verified escape: str.format performs attribute+index traversal at
+# runtime, reaching a real builtin's __self__ module and from there
+# sys.modules["os"].environ -- no dunder syntax in the AST at all except the
+# format-string field spec itself, which the validator never parses.
+BAD_SOURCE_FORMAT_REFLECTION = '''
+def forecast_campaign_roi(dataset, campaign_id="x"):
+    fmt = "{0.__self__.__loader__.find_spec.__func__.__globals__[sys].modules[os].environ}"
+    return fmt.format(len)
+'''
+
 def test_valid_source_passes():
     ok, _ = validate_skill_source(GOOD_SOURCE, "forecast_campaign_roi")
     assert ok is True
@@ -108,6 +118,11 @@ def test_frame_walk_escape_is_rejected():
     ok, reason = validate_skill_source(BAD_SOURCE_FRAME_WALK, "forecast_campaign_roi")
     assert ok is False
     assert "gi_frame" in reason or "frame" in reason.lower()
+
+def test_format_reflection_escape_is_rejected():
+    ok, reason = validate_skill_source(BAD_SOURCE_FORMAT_REFLECTION, "forecast_campaign_roi")
+    assert ok is False
+    assert "format" in reason.lower()
 
 def test_aliased_attribute_eval_call_is_rejected():
     ok, reason = validate_skill_source(BAD_SOURCE_ALIASED_ATTR_EVAL, "forecast_campaign_roi")

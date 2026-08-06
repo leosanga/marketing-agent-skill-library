@@ -1,6 +1,13 @@
 import ast
 
-FORBIDDEN_CALL_NAMES = {"eval", "exec", "open", "__import__", "compile", "input"}
+FORBIDDEN_CALL_NAMES = {
+    "eval", "exec", "open", "__import__", "compile", "input",
+    # str.format/format_map perform attribute+index traversal at runtime
+    # (e.g. "{0.__self__.__globals__[os]}".format(x)), reaching real module
+    # globals and builtins.os.environ without any dunder syntax in the
+    # source and without a blocked call target other than format itself.
+    "format", "format_map",
+}
 FORBIDDEN_NAME_PREFIXES = {"os", "sys", "subprocess", "socket", "shutil", "importlib"}
 
 # Non-dunder reflection attributes on generators/coroutines/frames/tracebacks.
