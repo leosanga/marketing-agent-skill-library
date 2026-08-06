@@ -3,8 +3,15 @@ import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
+
+# Must run before importing app.security_gate, which reads ALLOWED_ORIGIN
+# from the environment at import time. Loads .env into os.environ for local
+# dev; no-op if .env is absent (e.g. in Docker/Render, where env vars are
+# set directly).
+load_dotenv()
 
 from app.agent import MarketingAgent
 from app.data_gen import generate_dataset
