@@ -73,6 +73,58 @@ def test_agent_creates_new_skill_then_reuses_it_on_second_call():
     assert len(llm2.calls) == 1
 
 
+class RaisingLLMClient:
+    """Simulates a network/API failure from the LLM provider itself (not a
+    parsing failure) — e.g. Groq returning a 429 or a connection error.
+    """
+
+    def __init__(self, exc):
+        self._exc = exc
+        self.calls = []
+
+    def complete(self, system, user):
+        self.calls.append({"system": system, "user": user})
+        raise self._exc
+
+
+def test_agent_falls_back_when_llm_client_raises_during_routing():
+    dataset = generate_dataset(seed=5, num_campaigns=3, num_leads=5)
+    collection = build_vectorstore(dataset)
+    registry = SkillRegistry()
+
+    llm = RaisingLLMClient(RuntimeError("groq: 429 rate limit exceeded"))
+    agent = MarketingAgent(dataset, collection, registry, llm)
+
+    result = agent.handle_query("what's the ROI of any campaign?")
+
+    assert result.answer == "I don't have a way to do that yet."
+    assert result.skill_used is None
+    assert result.skill_created is False
+
+
+class RaisingCollection:
+    """Simulates a Chroma failure during retrieval — the very first thing
+    handle_query does, before any LLM call is even reached.
+    """
+
+    def query(self, *args, **kwargs):
+        raise RuntimeError("chroma: connection reset")
+
+
+def test_agent_falls_back_when_vectorstore_query_raises():
+    dataset = generate_dataset(seed=6, num_campaigns=3, num_leads=5)
+    registry = SkillRegistry()
+    llm = ScriptedLLMClient([])  # should never be called
+
+    agent = MarketingAgent(dataset, RaisingCollection(), registry, llm)
+    result = agent.handle_query("what's the ROI of any campaign?")
+
+    assert result.answer == "I don't have a way to do that yet."
+    assert result.skill_used is None
+    assert result.skill_created is False
+    assert llm.calls == []
+
+
 def test_agent_falls_back_when_drafted_skill_fails_validation():
     dataset = generate_dataset(seed=2, num_campaigns=3, num_leads=5)
     collection = build_vectorstore(dataset)

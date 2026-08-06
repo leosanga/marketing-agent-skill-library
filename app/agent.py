@@ -86,51 +86,58 @@ class MarketingAgent:
         return args
 
     def handle_query(self, query: str) -> AgentResponse:
-        context = query_vectorstore(self.collection, query, n_results=3)
-
+        # Outermost safety net: anything not already handled by the narrower
+        # try/excepts below (e.g. a raw exception from query_vectorstore, or
+        # from llm_client.complete() itself rather than its parsed output)
+        # must still fail closed with the plain fallback, never a stack trace.
         try:
-            skill_name, args = route_query(query, self.registry, self.llm_client, context)
-        except RoutingError:
-            skill_name, args = None, {}
+            context = query_vectorstore(self.collection, query, n_results=3)
 
-        if skill_name and self.registry.has(skill_name):
-            skill = self.registry.get(skill_name)
             try:
-                answer = run_with_timeout(skill.func, kwargs=args)
+                skill_name, args = route_query(query, self.registry, self.llm_client, context)
+            except RoutingError:
+                skill_name, args = None, {}
+
+            if skill_name and self.registry.has(skill_name):
+                skill = self.registry.get(skill_name)
+                try:
+                    answer = run_with_timeout(skill.func, kwargs=args)
+                except SkillExecutionError:
+                    return AgentResponse(
+                        answer="I hit an error running that. Try a different question.",
+                        skill_used=skill_name,
+                        skill_created=False,
+                    )
+                return AgentResponse(answer=answer, skill_used=skill_name, skill_created=False)
+
+            try:
+                drafted = draft_skill(query, self.llm_client, context=context)
+            except SkillDraftError:
+                return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
+
+            is_valid, _reason = validate_skill_source(drafted.source_code, drafted.name)
+            if not is_valid:
+                return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
+
+            draft_args = self._extract_args_for_drafted_skill(query, drafted, context)
+
+            try:
+                compiled_func = compile_skill(drafted.source_code, drafted.name)
+                bound_func = self._bind_drafted_skill(compiled_func)
+                answer = run_with_timeout(bound_func, kwargs=draft_args)
             except SkillExecutionError:
-                return AgentResponse(
-                    answer="I hit an error running that. Try a different question.",
-                    skill_used=skill_name,
-                    skill_created=False,
-                )
-            return AgentResponse(answer=answer, skill_used=skill_name, skill_created=False)
+                return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
 
-        try:
-            drafted = draft_skill(query, self.llm_client, context=context)
-        except SkillDraftError:
+            # Only register after a successful real execution — never save a skill
+            # that was merely validated but not proven to actually run.
+            self.registry.register(Skill(
+                name=drafted.name,
+                description=drafted.description,
+                args_schema=drafted.args_schema,
+                source_code=drafted.source_code,
+                func=bound_func,
+            ))
+
+            return AgentResponse(answer=answer, skill_used=drafted.name, skill_created=True)
+        except Exception:
             return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
-
-        is_valid, _reason = validate_skill_source(drafted.source_code, drafted.name)
-        if not is_valid:
-            return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
-
-        draft_args = self._extract_args_for_drafted_skill(query, drafted, context)
-
-        try:
-            compiled_func = compile_skill(drafted.source_code, drafted.name)
-            bound_func = self._bind_drafted_skill(compiled_func)
-            answer = run_with_timeout(bound_func, kwargs=draft_args)
-        except SkillExecutionError:
-            return AgentResponse(answer=FALLBACK_ANSWER, skill_used=None, skill_created=False)
-
-        # Only register after a successful real execution — never save a skill
-        # that was merely validated but not proven to actually run.
-        self.registry.register(Skill(
-            name=drafted.name,
-            description=drafted.description,
-            args_schema=drafted.args_schema,
-            source_code=drafted.source_code,
-            func=bound_func,
-        ))
-
-        return AgentResponse(answer=answer, skill_used=drafted.name, skill_created=True)
