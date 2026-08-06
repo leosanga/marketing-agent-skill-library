@@ -1,5 +1,6 @@
 import chromadb
-from chromadb.utils import embedding_functions
+
+from app.embeddings import HashingEmbeddingFunction
 
 
 def _campaign_to_document(campaign: dict) -> str:
@@ -25,7 +26,7 @@ def build_vectorstore(dataset: dict, persist_path: str | None = None):
         if persist_path
         else chromadb.EphemeralClient()
     )
-    embedding_fn = embedding_functions.DefaultEmbeddingFunction()
+    embedding_fn = HashingEmbeddingFunction()
     collection = client.get_or_create_collection(
         name="marketing_data", embedding_function=embedding_fn
     )
